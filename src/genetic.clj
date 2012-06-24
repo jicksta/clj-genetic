@@ -1,6 +1,11 @@
-(use '[clojure.string :only (split trim-newline)])
-(use 'clj-time.core)
-(use 'clj-time.format)
+(ns genetic 
+  (:use
+    ;[fs.core :only (normalized-path)]
+    [clojure.string :only (split trim-newline)]
+    [clojure.java.io :only (reader)]
+    [clj-time.core :only (before? after?)]
+    [clj-time.format :only (parse formatters)])
+  (:require clojure.java.io))
 
 (defstruct person :name :origin)
 (defstruct flight :from :to :departs-at :arrives-at :cost)
@@ -8,15 +13,19 @@
 (def destination "LGA")
 
 (def people [
-             (struct person "Seymour" "BOS")
-             (struct person "Franny"  "DAL")
-             (struct person "Zooey"   "CAK")
-             (struct person "Walt"    "MIA")
-             (struct person "Buddy"   "ORD")
-             (struct person "Les"     "OMA")
+   (struct person "Seymour" "BOS")
+   (struct person "Franny"  "DAL")
+   (struct person "Zooey"   "CAK")
+   (struct person "Walt"    "MIA")
+   (struct person "Buddy"   "ORD")
+   (struct person "Les"     "OMA")
 ])
 
-(def csv-contents (slurp "schedule.csv"))
+(def csv-contents (partition 5 (split (slurp "data/schedule.csv") #"[,\n]")))
+
+; TODO
+; * Use lazy-seqs for filtering the flights instead of indexed-flights. Would be awesome
+; * Use (partion 2 coll) instead of dividing the solution up into a 2 dimensional vector
 
 (defn parse-date [date]
   "The CSV expresses flight times as HH:MM. This converts this String into a clj-time DateTime object."
@@ -24,16 +33,15 @@
 
 (defn parse-flights []
   "Load each flight from the already-loaded CSV and return a list of flight structs"
-  (let [lines (split csv-contents #"\n")] 
-    (for [line, lines] 
-      (let [[from to departs-at arrives-at cost] (split (trim-newline line) #",")] 
-        (struct flight from to (parse-date departs-at) (parse-date arrives-at) (read-string cost))))))
+    (for [line csv-contents] 
+      (let [[from to departs-at arrives-at cost] line] 
+        (struct flight from to (parse-date departs-at) (parse-date arrives-at) (read-string cost)))))
 
 (defn indexed-flights [flights]
   "Groups all flights by [from,to] vectors as the key with the list of matching flight structs as the values."
   (group-by (fn [flight] [(:from flight) (:to flight)]) flights))
 
-;(def sample-solution [[1 4] [3 2] [7 3] [6 3] [2 4] [5 3]])
+#_(def sample-solution [[1 4] [3 2] [7 3] [6 3] [2 4] [5 3]])
 
 (def flights (indexed-flights (parse-flights)))
 
@@ -42,14 +50,14 @@
    Takes the form (person struct, departure flight struct, arrival flight struct)"
   (for [[person [departure-index, return-index]] (vec (apply map vector [people solution]))]
     (let [origin (:origin person)]
-    [person (nth (flights [origin destination]) departure-index) (nth (flights [origin destination]) return-index)])))
+      [person ((flights [origin destination]) departure-index) ((flights [origin destination]) return-index)])))
 
 (defn schedule-cost [raw-solution]
   "Returns the overall numerical cost of a given solution.
    Used to compare relative betterness of different solutions."
   (let [results (solutions-with-people raw-solution)
-        first-departure-time (:departs-at (nth (first results) 1))
-        first-arrival-time   (:arrives-at (nth (first results) 2))]
+        first-departure-time (:departs-at ((first results) 1))
+        first-arrival-time   (:arrives-at ((first results) 2))]
     (loop [[[person departure return] & remaining] results
            total-cost 0
            earliest-departure first-departure-time 
@@ -76,8 +84,8 @@
 
 (defn random-solution []
   (let [random-seq (repeatedly #(rand-int 100))]
-  (for [person people]
-    [(random-departure-index-for-person person) (random-arrival-index-for-person person)])))
+    (for [person people]
+      [(random-departure-index-for-person person) (random-arrival-index-for-person person)])))
 
 (def random-solutions
   (sort-by schedule-cost (take 100 (repeatedly random-solution))))
@@ -85,8 +93,6 @@
 (println "Solutions:")
 (dorun (for [solution (take 10 random-solutions)]
   (println (schedule-cost solution) (flatten solution))))
-
-
 
 
 
