@@ -1,11 +1,11 @@
-(ns genetic 
+(ns genetic
   (:use
     ;[fs.core :only (normalized-path)]
     [clojure.string :only (split trim-newline)]
     [clojure.java.io :only (reader)]
     [clj-time.core :only (before? after?)]
     [clj-time.format :only (parse formatters)])
-  (:require clojure.java.io))
+  (:require clojure.java.io clojure.set))
 
 (defstruct person :name :origin)
 (defstruct flight :from :to :departs-at :arrives-at :cost)
@@ -23,90 +23,158 @@
 
 (def csv-contents (partition 5 (split (slurp "data/schedule.csv") #"[,\n]")))
 
-; TODO
-; * Use lazy-seqs for filtering the flights instead of indexed-flights. Would be awesome
-; * Use (partion 2 coll) instead of dividing the solution up into a 2 dimensional vector
 
-(defn parse-date [date]
+(defn wtf
+  "Just my little inspect helper"
+  [& vals]
+  (apply println vals)
+  (last vals))
+
+(defn parse-date
   "The CSV expresses flight times as HH:MM. This converts this String into a clj-time DateTime object."
+  [date]
   (parse (formatters :hour-minute) date))
 
-(defn parse-flights []
+(defn parse-flights
   "Load each flight from the already-loaded CSV and return a list of flight structs"
-    (for [line csv-contents] 
-      (let [[from to departs-at arrives-at cost] line] 
-        (struct flight from to (parse-date departs-at) (parse-date arrives-at) (read-string cost)))))
+  []
+  (for [line csv-contents]
+    (let [[from to departs-at arrives-at cost] line]
+      (struct flight from to (parse-date departs-at) (parse-date arrives-at) (read-string cost)))))
 
-(defn indexed-flights [flights]
-  "Groups all flights by [from,to] vectors as the key with the list of matching flight structs as the values."
+(defn indexed-flights
+  "Groups all flights by [from,to] vectors as the key with the
+   list of matching flight structs as the values."
+  [flights]
   (group-by (fn [flight] [(:from flight) (:to flight)]) flights))
 
 #_(def sample-solution [[1 4] [3 2] [7 3] [6 3] [2 4] [5 3]])
 
 (def flights (indexed-flights (parse-flights)))
 
-(defn solutions-with-people [solution]
-  "Returns a list associating each person with the relevant flights from the way it's expressed in a solution.
-   Takes the form (person struct, departure flight struct, arrival flight struct)"
-  (for [[person [departure-index, return-index]] (vec (apply map vector [people solution]))]
-    (let [origin (:origin person)]
-      [person ((flights [origin destination]) departure-index) ((flights [origin destination]) return-index)])))
+(defn change-index
+  "Returns a new collection with the given index changed to a new value"
+  [coll index new-value]
+  (concat (take index coll) [new-value] (nthnext coll (inc index))))
 
-(defn schedule-cost [raw-solution]
+(defn flight-at-index
+  "Returns the flight at a given index from one airport to another"
+  [from to index]
+  ((flights [from to]) index))
+
+(defn solutions-with-people
+  "Returns a list associating each person with the relevant flights from the way it's expressed
+  in a solution. Takes the form (person struct, departure flight struct, arrival flight struct)"
+  [solution]
+  (for [[person [departure-index, return-index] :as ohai] (map list people (partition 2 solution))]
+    (let [origin (:origin person)]
+      (vector
+        person
+        (flight-at-index origin destination departure-index)
+        (flight-at-index destination origin return-index)))))
+
+(defn schedule-cost
   "Returns the overall numerical cost of a given solution.
    Used to compare relative betterness of different solutions."
+  [raw-solution]
   (let [results (solutions-with-people raw-solution)
         first-departure-time (:departs-at ((first results) 1))
         first-arrival-time   (:arrives-at ((first results) 2))]
     (loop [[[person departure return] & remaining] results
            total-cost 0
-           earliest-departure first-departure-time 
+           earliest-departure first-departure-time
            latest-arrival first-arrival-time]
       ; TODO: Support wait times.
-      (let [new-cost (+ total-cost (:cost departure) (:cost return))] 
+      (let [new-cost (+ total-cost (:cost departure) (:cost return))]
        (if (empty? remaining)
          new-cost
          (recur
-           remaining 
+           remaining
            new-cost
-           (if (before? (:departs-at departure) earliest-departure) 
+           (if (before? (:departs-at departure) earliest-departure)
              (:departs-at departure)
              earliest-departure)
            (if (after? (:arrives-at return) latest-arrival)
              (:arrives-at departure)
              latest-arrival)))))))
 
+(defn flights-count
+  "Returns the number of available flights for the given person in a certain direction"
+  [person direction]
+  (let [direction-transform (case direction :depart identity, :arrive reverse)
+         airports (direction-transform [(:origin person) destination])]
+    (count (flights airports))))
+
 (defn random-departure-index-for-person [person]
-  (rand-int (count (flights [(:origin person) destination]))))
+  (rand-int (flights-count person :depart)))
 
 (defn random-arrival-index-for-person [person]
-  (rand-int (count (flights [destination (:origin person)]))))
+  (rand-int (flights-count person :arrive)))
 
 (defn random-solution []
-  (let [random-seq (repeatedly #(rand-int 100))]
+  (reduce concat
     (for [person people]
-      [(random-departure-index-for-person person) (random-arrival-index-for-person person)])))
+      (list (random-departure-index-for-person person) (random-arrival-index-for-person person)))))
 
-(def random-solutions
-  (sort-by schedule-cost (take 100 (repeatedly random-solution))))
+(defn random-solutions
+  ([] (random-solutions 100))
+  ([n] (sort-by schedule-cost (take n (repeatedly random-solution)))))
 
-(println "Solutions:")
-(dorun (for [solution (take 10 random-solutions)]
-  (println (schedule-cost solution) (flatten solution))))
+(defn conj-present
+  "Conj only params that are truthy"
+  [coll & xs]
+  (apply conj coll (filter identity xs)))
+
+(defn adjacent-solutions [solution]
+  (loop [solutions #{}
+         [[value index] & remaining-indices] (map vector solution (range (count solution)))]
+    (let [person (people (int (/ index 2)))
+          direction (case (mod index 2) 0 :depart, 1 :arrive)
+          num-flights (flights-count person direction)
+          expanded-solutions (conj-present
+                               solutions
+                               (when-not (= value (dec num-flights))
+                                 (change-index solution index (inc value)))
+                               (when-not (zero? value)
+                                 (change-index solution index (dec value))))]
+      (if (empty? remaining-indices)
+        expanded-solutions
+        (recur expanded-solutions remaining-indices)))))
+
+(defn better-solution
+  "Returns the better of two solutions."
+  [one two]
+  (if (< (schedule-cost one) (schedule-cost two)) one two))
+
+(defn best-solution
+  "Returns the best of all given solutions"
+  [solutions]
+  (reduce better-solution solutions))
+
+(defn best-adjacent-solution
+  "Finds the adjacent solutions which are cheaper than the given solution.
+   Returns the given solution if there are no better solutions."
+  [solution]
+  (let [possible-solutions (conj (adjacent-solutions solution) solution)]
+    (best-solution possible-solutions)))
+
+(defn print-solution
+  "Prints the solution with its cost prettily."
+  [solution]
+  (printf "$%d => %s\n" (schedule-cost solution) (pr-str solution)))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+; Note: Best solution I've seen so far is $1,714.
 
+(let [n 100, solutions (random-solutions n)]
+  (println "Best of" n "solutions generated randomly:")
+  (print-solution (best-solution solutions))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-  
+  (newline)
 
-;(defn print-schedule [flights solution]
-;  (let [[person [departs-index, returns-index]] (interleave people sample-solution)
-;         {depart-flight-num :flight-num} (nth flights departs-index)
-;         {return-flight-num :flight-num} (nth flights returns-index)]
-;    (prn (format
-;      "%10s should take Flight #%s and Flight #%s"
-;      (:name person) depart-flight-num return-flight-num))))
-
+  (println "Best of all neighbors of previous set:")
+  (print-solution (best-solution (map best-adjacent-solution solutions))))
