@@ -23,7 +23,6 @@
 
 (def csv-contents (partition 5 (split (slurp "data/schedule.csv") #"[,\n]")))
 
-
 (defn wtf
   "Just my little inspect helper"
   [& vals]
@@ -48,7 +47,7 @@
   [flights]
   (group-by (fn [flight] [(:from flight) (:to flight)]) flights))
 
-#_(def sample-solution [[1 4] [3 2] [7 3] [6 3] [2 4] [5 3]])
+#_(def sample-solution [1 4 3 2 7 3 6 3 2 4 5 3])
 
 (def flights (indexed-flights (parse-flights)))
 
@@ -158,6 +157,13 @@
   (let [possible-solutions (conj (adjacent-solutions solution) solution)]
     (best-solution possible-solutions)))
 
+(defn hill-search [start-solution]
+  (loop [solution start-solution]
+    (let [best-neighbor (best-adjacent-solution solution)]
+      (if (= solution best-neighbor)
+        solution
+        (recur best-neighbor)))))
+
 (defn print-solution
   "Prints the solution with its cost prettily."
   [solution]
@@ -168,13 +174,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-; Note: Best solution I've seen so far is $1,714.
+; Note: Best solution I've seen so far is $1,573.
 
-(let [n 100, solutions (random-solutions n)]
+(let [n 10, solutions (random-solutions n)]
   (println "Best of" n "solutions generated randomly:")
   (print-solution (best-solution solutions))
 
   (newline)
 
   (println "Best of all neighbors of previous set:")
-  (print-solution (best-solution (map best-adjacent-solution solutions))))
+  (print-solution (best-solution (map best-adjacent-solution solutions)))
+
+  (newline)
+
+  (println "Best of hill search:")
+  (print-solution (best-solution (map hill-search solutions))))
