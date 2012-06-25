@@ -1,7 +1,3 @@
 Experimenting with genetic algorithms in Clojure.
 
 Don't forget to run `lein deps`
-
-TODO
-----
-* Figure out how to run this in parallel utilizing every core on the machine.

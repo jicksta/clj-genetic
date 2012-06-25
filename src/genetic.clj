@@ -176,16 +176,19 @@
 
 ; Note: Best solution I've seen so far is $1,573.
 
-(let [n 10, solutions (random-solutions n)]
+(let [n 50, solutions (random-solutions n)]
   (println "Best of" n "solutions generated randomly:")
   (print-solution (best-solution solutions))
 
   (newline)
 
   (println "Best of all neighbors of previous set:")
-  (print-solution (best-solution (map best-adjacent-solution solutions)))
+  (print-solution (best-solution (pmap best-adjacent-solution solutions)))
 
   (newline)
 
-  (println "Best of hill search:")
-  (print-solution (best-solution (map hill-search solutions))))
+;  (println "Best of hill search with single-core:")
+;  (time (print-solution (best-solution (map hill-search solutions))))
+
+  (println "Best of hill search concurrently:")
+  (time (print-solution (best-solution (pmap hill-search solutions)))))
