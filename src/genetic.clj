@@ -1,11 +1,13 @@
 (ns genetic
   (:use
-    ;[fs.core :only (normalized-path)]
     [clojure.string :only (split trim-newline)]
     [clojure.java.io :only (reader)]
     [clj-time.core :only (before? after?)]
     [clj-time.format :only (parse formatters)])
   (:require clojure.java.io clojure.set))
+
+
+; Note: Best solution I've seen so far is $1,566 (through genetic run).
 
 (defstruct person :name :origin)
 (defstruct flight :from :to :departs-at :arrives-at :cost)
@@ -65,7 +67,7 @@
   "Returns a list associating each person with the relevant flights from the way it's expressed
   in a solution. Takes the form (person struct, departure flight struct, arrival flight struct)"
   [solution]
-  (for [[person [departure-index, return-index] :as ohai] (map list people (partition 2 solution))]
+  (for [[person [departure-index, return-index]] (map list people (partition 2 solution))]
     (let [origin (:origin person)]
       (vector
         person
@@ -124,11 +126,17 @@
   [coll & xs]
   (apply conj coll (filter identity xs)))
 
+(defn person-for-index [index]
+  (people (int (/ index 2))))
+
+(defn direction-for-index [index]
+  (if (even? index) :depart :arrive))
+
 (defn adjacent-solutions [solution]
   (loop [solutions #{}
          [[value index] & remaining-indices] (map vector solution (range (count solution)))]
-    (let [person (people (int (/ index 2)))
-          direction (case (mod index 2) 0 :depart, 1 :arrive)
+    (let [person (person-for-index index)
+          direction (direction-for-index index)
           num-flights (flights-count person direction)
           expanded-solutions (conj-present
                                solutions
@@ -157,7 +165,10 @@
   (let [possible-solutions (conj (adjacent-solutions solution) solution)]
     (best-solution possible-solutions)))
 
-(defn hill-search [start-solution]
+(defn hill-search
+  "Walks through adjacent neighbors of the given solution until it finds the one
+  with the best fitness (lowest cost)."
+  [start-solution]
   (loop [solution start-solution]
     (let [best-neighbor (best-adjacent-solution solution)]
       (if (= solution best-neighbor)
@@ -169,14 +180,39 @@
   [solution]
   (printf "$%d => %s\n" (schedule-cost solution) (pr-str solution)))
 
+(defn rand-int-without
+  "Generates a random number between 0 and 'n', but guarantees the number returned is
+  not equal to the 'excluded' param."
+  [n excluded]
+  (loop []
+    (let [attempt (rand-int n)]
+      (if (= attempt excluded)
+        (recur)
+        attempt))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn mutate
+  "Mutate a random gene to a different, valid value."
+  [solution]
+  (let [mutated-gene-index (rand-int (count solution))]
+    (change-index
+      solution
+      mutated-gene-index
+      (rand-int-without
+        (flights-count
+          (person-for-index mutated-gene-index)
+          (direction-for-index mutated-gene-index))
+        (nth solution mutated-gene-index)))))
 
-; Note: Best solution I've seen so far is $1,573.
+(defn crossover
+  "Breed two chromosomes using cut-and-splice crossover"
+  [male female]
+  (assert (= (count male) (count female)))
+  (let [splice-point (rand-int (count male))]
+    (concat
+      (take splice-point male)
+      (nthnext female splice-point))))
 
-(let [n 50, solutions (random-solutions n)]
+#_(let [n 50, solutions (random-solutions n)]
   (println "Best of" n "solutions generated randomly:")
   (print-solution (best-solution solutions))
 
@@ -192,3 +228,59 @@
 
   (println "Best of hill search concurrently:")
   (time (print-solution (best-solution (pmap hill-search solutions)))))
+
+(defn probabilistically-true
+  "Return true or false depending on the given probability as expressed as a decimal between 0 and 1.
+   A probability of 0"
+  [probability]
+  (<= (rand-int 10000) (* 10000 probability)))
+
+(defn probabilistic-apply
+  "Returns either the given param or the result of invoking the function with the given
+  param. The given probability determines how frequently the function will be used."
+  [fn probability param]
+  (if (probabilistically-true probability)
+    (fn param)
+    param))
+
+(defn random-pair
+  "Return two unique items from the given collection as a vector"
+  [from]
+  (assert (>= (count from) 2))
+  (let [x (rand-nth from)]
+    (loop [y (rand-nth from)]
+      (if (identical? x y)
+        (recur (rand-nth from))
+        [x y]))))
+
+(let [
+  population-size      100
+  generations          10
+  mutation-probability 0.5
+  percentage-elite     0.5]
+
+  (defn next-generation [previous-generation]
+    (let [prev-generation-size (count previous-generation)
+          elite-size           (int (* percentage-elite prev-generation-size))
+          terminated-size      (- prev-generation-size elite-size)
+          ranked-population    (sort-by schedule-cost previous-generation)
+          elite-population     (take elite-size ranked-population)]
+      (concat
+        elite-population
+        (letfn [(make-baby []
+                  (if (probabilistically-true mutation-probability)
+                    (mutate (rand-nth elite-population))
+                    (apply crossover (random-pair elite-population))))]
+          (take terminated-size (repeatedly make-baby))))))
+
+  (defn genetic-search [progenitors]
+    (best-solution
+      (nth (iterate next-generation progenitors) generations)))
+
+  (defn random-generation
+    ([] (random-generation population-size))
+    ([size] (random-solutions size))))
+
+
+(defn main []
+  (print-solution (genetic-search (random-generation))))

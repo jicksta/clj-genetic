@@ -6,17 +6,29 @@
   (:require
     clojure.set))
 
-
 ; TODO: Setup mocking framework so I can test hill-search
 
+(defn throws? [fn & args]
+  (try
+    (apply fn args)
+    false
+    (catch Error e true)))
 
 (def twice-people-count (* 2 (count people)))
+
+(describe throws?
+  (it "returns true when the given function raises an exception"
+    (true? (throws? #(assert false))))
+  (it "returns false when the given function does not raise an exception"
+    (false? (throws? (fn [] :not-throwing)))))
 
 (defn aggregate-costs-
   "Pass in either clojure.core/max or clojure.core/min as a fn
   to get the max or min of all the costs per person"
   [aggregation-fn]
-  (* twice-people-count (apply aggregation-fn (map :cost (parse-flights)))))
+  (*
+    twice-people-count
+    (apply aggregation-fn (map :cost (parse-flights)))))
 
 (describe csv-contents
   (it "has five tokens in its first line"
@@ -52,6 +64,18 @@
       (< 0 (flights-count (first people) :depart))
       (< 0 (flights-count (first people) :arrive)))))
 
+(describe person-for-index
+  (it "returns the right person at each index"
+    (=
+      (map person-for-index (range twice-people-count))
+      (reduce #(conj %1 %2 %2) [] people))))
+
+(describe direction-for-index
+  (it "returns the correct directon for all possible indices"
+    (=
+      (take twice-people-count (cycle [:depart :arrive]))
+      (map direction-for-index (range twice-people-count)))))
+
 (describe solutions-with-people
   (it "returns a list containing a collection with the person and
        the departure and arrival flights"
@@ -75,6 +99,29 @@
                             (change-index solution 1 2)}]
       (subset? known-adjacents adjacents))))
 
+
+(describe random-generation
+  (it "returns an array of solutions"
+    (let [generation (random-generation 10)]
+      (every?
+        (fn [solution]
+          (and
+            (= twice-people-count (count solution))
+            (every? #(= % (int %)) solution))) generation))))
+
+(describe next-generation
+
+  (let [subsequent-generation (nth (iterate next-generation (random-generation 10)) 3)]
+
+    (it "returns a two-dimensional collection of collections"
+      (let [[first-solution & _ :as first-generation] subsequent-generation]
+        (and
+          (every? coll? first-generation)
+          (every? #(= % (int %)) (wtf first-solution)))))
+    (it "returns the same number of population as the given generation"
+      (= 10 (count subsequent-generation)))))
+
+
 (describe indexed-flights
   (it "keys the map with lists containing the from and to airport codes"
     (let [origin "FOO"
@@ -87,3 +134,17 @@
 (describe random-solution
   (it "returns two numbers per person"
     (= (count (random-solution)) (* 2 (count people)))))
+
+(describe mutate
+  (letfn
+    [(check-mutation []
+      (let [solution (random-solution)
+            mutated (mutate solution)]
+        (and
+          (not-any? nil? mutated)
+          (= 1 (count
+                 (filter false?
+                   (map = solution mutated)))))))]
+
+    (it "changes one of the numbers in the solution to a different random value"
+      (every? identity (take 100 (repeatedly check-mutation))))))
