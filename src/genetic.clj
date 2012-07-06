@@ -231,7 +231,7 @@
 
 (defn probabilistically-true
   "Return true or false depending on the given probability as expressed as a decimal between 0 and 1.
-   A probability of 0"
+   A probability of 0.25 will return true approximately 25% of the time. "
   [probability]
   (<= (rand-int 10000) (* 10000 probability)))
 
@@ -254,8 +254,8 @@
         [x y]))))
 
 (let [
-  population-size      100
-  generations          10
+  population-size      25
+  generations          75
   mutation-probability 0.5
   percentage-elite     0.5]
 
